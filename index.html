@@ -262,12 +262,14 @@
     <!-- ================= リアルタイムスキャナーUI ================= -->
     <div id="scanner-container" class="hidden">
         <div class="scan-status" id="scan-status-text">スキャン中... キー番号を枠に合わせてください</div>
+        <div id="live-ocr-result" class="hidden" style="color: #00FF00; font-size: clamp(32px, 5vh, 48px); font-weight: bold; text-align: center; position: absolute; top: clamp(80px, 12vh, 160px); width: 100%; z-index: 10001; text-shadow: 2px 2px 4px #000; background: rgba(0,0,0,0.5); padding: 10px 0;" data-text="">認識結果: (未検出)</div>
         <div style="position: relative; width: 100%; overflow: hidden; display: flex; justify-content: center;">
             <video id="live-video" autoplay playsinline></video>
             <div class="scan-guide"></div>
         </div>
         <div class="scanner-controls">
             <button type="button" class="btn-cancel-scan" onclick="closeLiveScanner()">キャンセル</button>
+            <button type="button" id="btn-confirm-scan" class="btn-cancel-scan" style="background-color: #4CAF50; display: none; margin-left: 16px;" onclick="confirmScan()">決 定</button>
         </div>
         <canvas id="scan-canvas" class="hidden"></canvas>
     </div>
@@ -369,6 +371,16 @@
             const videoElement = document.getElementById('live-video');
             const statusText = document.getElementById('scan-status-text');
             
+            // UIのリセット
+            const ocrResult = document.getElementById('live-ocr-result');
+            if (ocrResult) {
+                ocrResult.textContent = '認識結果: (未検出)';
+                ocrResult.dataset.text = '';
+                ocrResult.classList.add('hidden');
+            }
+            const confirmBtn = document.getElementById('btn-confirm-scan');
+            if (confirmBtn) confirmBtn.style.display = 'none';
+
             scannerContainer.classList.remove('hidden');
             statusText.textContent = "カメラを起動しています...";
             isScanning = true;
@@ -412,6 +424,23 @@
             }
         }
 
+        function confirmScan() {
+            const ocrResult = document.getElementById('live-ocr-result');
+            const resultText = ocrResult ? ocrResult.dataset.text : '';
+            if (resultText && resultText.length >= 3) {
+                document.getElementById('key-number').value = resultText;
+                
+                const resultMsg = document.getElementById('result-message');
+                if (resultMsg) {
+                    resultMsg.textContent = '読み取り成功';
+                    resultMsg.style.color = '#000000';
+                }
+                
+                closeLiveScanner();
+                document.getElementById('key-number').focus();
+            }
+        }
+
         async function startScanLoop() {
             const videoElement = document.getElementById('live-video');
             const canvas = document.getElementById('scan-canvas');
@@ -431,17 +460,17 @@
                         const result = await Tesseract.recognize(canvas, 'eng');
                         const extractedText = result.data.text.replace(/[^a-zA-Z0-9]/g, '');
                         
-                        // 3文字以上の英数字が検出されたら成功とみなす
+                        // 3文字以上の英数字が検出されたらプレビューを更新する
                         if (extractedText && extractedText.length >= 3) {
-                            document.getElementById('key-number').value = extractedText;
-                            
-                            // 結果エリアが表示されている場合のためにメッセージを更新
-                            const resultMsg = document.getElementById('result-message');
-                            resultMsg.textContent = '読み取り成功';
-                            resultMsg.style.color = '#000000';
-                            
-                            closeLiveScanner();
-                            return; // ループ終了
+                            const ocrResult = document.getElementById('live-ocr-result');
+                            if (ocrResult) {
+                                ocrResult.textContent = '認識結果: ' + extractedText;
+                                ocrResult.dataset.text = extractedText;
+                                ocrResult.classList.remove('hidden');
+                            }
+                            const confirmBtn = document.getElementById('btn-confirm-scan');
+                            if (confirmBtn) confirmBtn.style.display = 'block';
+                            // 自動で閉じず、ユーザーが「決定」を押すまで待つ
                         }
                     } catch (error) {
                         console.error('Live Scan Error:', error);
