@@ -9,8 +9,6 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700&display=swap" rel="stylesheet">
-    <!-- Tesseract.js (OCR機能用) -->
-    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
     <style>
         /* 全体のリセットと基本設定 */
         body, html {
@@ -73,6 +71,39 @@
         input[type="text"]:focus, input[type="number"]:focus {
             outline: none;
             box-shadow: 0 0 0 8px rgba(0, 0, 0, 0.2);
+        }
+
+        /* --- カウンターUIのスタイル --- */
+        .counter-ui {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 20px;
+            margin-bottom: clamp(24px, 4vh, 56px);
+        }
+        .btn-counter {
+            font-size: clamp(40px, 6vh, 64px);
+            width: clamp(64px, 10vw, 100px);
+            height: clamp(64px, 10vw, 100px);
+            border-radius: 50%;
+            border: 6px solid #000000;
+            background-color: #FFFFFF;
+            color: #000000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 0;
+            min-width: 0;
+            margin-bottom: 0;
+            touch-action: manipulation;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .btn-counter:active {
+            transform: scale(0.95);
+        }
+        .counter-ui input[type="number"] {
+            width: clamp(120px, 20vw, 180px);
+            margin-bottom: 0;
         }
 
         /* --- ボタンの共通スタイル --- */
@@ -180,8 +211,7 @@
         .btn-ocr:active {
             transform: scale(0.98);
         }
-        .btn-ipad { background-color: #4CAF50; margin-bottom: 0; }
-        .btn-android { background-color: #2196F3; margin-bottom: 0; }
+        .btn-scan { background-color: #2196F3; margin-bottom: 0; }
         .camera-button-container {
             display: flex;
             gap: 16px;
@@ -261,15 +291,15 @@
 
     <!-- ================= リアルタイムスキャナーUI ================= -->
     <div id="scanner-container" class="hidden">
-        <div class="scan-status" id="scan-status-text">スキャン中... キー番号を枠に合わせてください</div>
+        <div class="scan-status" id="scan-status-text">キー番号を枠に合わせて「読み取り」を押してください</div>
         <div id="live-ocr-result" class="hidden" style="color: #00FF00; font-size: clamp(32px, 5vh, 48px); font-weight: bold; text-align: center; position: absolute; top: clamp(80px, 12vh, 160px); width: 100%; z-index: 10001; text-shadow: 2px 2px 4px #000; background: rgba(0,0,0,0.5); padding: 10px 0;" data-text="">認識結果: (未検出)</div>
         <div style="position: relative; width: 100%; overflow: hidden; display: flex; justify-content: center;">
             <video id="live-video" autoplay playsinline></video>
-            <div class="scan-guide"></div>
+            <div class="scan-guide" id="scan-guide-box"></div>
         </div>
         <div class="scanner-controls">
             <button type="button" class="btn-cancel-scan" onclick="closeLiveScanner()">キャンセル</button>
-            <button type="button" id="btn-confirm-scan" class="btn-cancel-scan" style="background-color: #4CAF50; display: none; margin-left: 16px;" onclick="confirmScan()">決 定</button>
+            <button type="button" id="btn-capture-scan" class="btn-cancel-scan" style="background-color: #4CAF50; margin-left: 16px;" onclick="captureAndAnalyze()">読み取り</button>
         </div>
         <canvas id="scan-canvas" class="hidden"></canvas>
     </div>
@@ -280,14 +310,24 @@
             <form onsubmit="handleReception(event);">
                 <label for="key-number">キー番号</label>
                 <div class="camera-button-container">
-                    <button type="button" class="btn-ocr btn-ipad" onclick="openCamera()">📷 iPad用カメラ</button>
-                    <button type="button" class="btn-ocr btn-android" onclick="openLiveScanner()">📷 Android用スキャナ</button>
+                    <button type="button" class="btn-ocr btn-scan" onclick="openScanner()">📷 カメラで読み取り</button>
                 </div>
                 <input type="file" accept="image/*" capture="environment" id="camera-file-input" class="hidden" onchange="handleImageCapture(event)">
                 <input type="text" id="key-number" name="key-number" placeholder="入力または読み取り" autocomplete="off">
                 
-                <label for="guest-count">来場人数</label>
-                <input type="number" id="guest-count" name="guest-count" value="1" min="1" autocomplete="off">
+                <label for="companion-count">同伴者</label>
+                <div class="counter-ui">
+                    <button type="button" class="btn-counter" onclick="adjustCount('companion-count', -1)">-</button>
+                    <input type="number" id="companion-count" name="companion-count" value="0" min="0" autocomplete="off" readonly>
+                    <button type="button" class="btn-counter" onclick="adjustCount('companion-count', 1)">+</button>
+                </div>
+                
+                <label for="child-count">お子様</label>
+                <div class="counter-ui">
+                    <button type="button" class="btn-counter" onclick="adjustCount('child-count', -1)">-</button>
+                    <input type="number" id="child-count" name="child-count" value="0" min="0" autocomplete="off" readonly>
+                    <button type="button" class="btn-counter" onclick="adjustCount('child-count', 1)">+</button>
+                </div>
                 
                 <div class="button-group">
                     <button type="button" class="btn-white" onclick="clearInput()">取り消し</button>
@@ -334,6 +374,14 @@
     <script>
         let currentKeyNumber = '';
 
+        function adjustCount(elementId, delta) {
+            const input = document.getElementById(elementId);
+            let currentValue = parseInt(input.value, 10) || 0;
+            let newValue = currentValue + delta;
+            if (newValue < 0) newValue = 0;
+            input.value = newValue;
+        }
+
         // ================= GAS API通信設定 =================
         // ここに新しくデプロイしたGASのWebアプリURL（https://script.google.com/.../exec）を貼り付けます
         const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbwinhvQFeHIi8j3gZ6_q5IQ2BEPJWYQDwi8eX8dcXbWxMNHQErqeWEGmWco2uiUexjwiQ/exec';
@@ -363,8 +411,15 @@
 
         // ================= リアルタイムスキャナー処理 =================
         let videoStream = null;
-        let isScanning = false;
-        let scanTimeout = null;
+
+        // 統合されたカメラスキャン起動処理
+        function openScanner() {
+            if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+                openLiveScanner();
+            } else {
+                openCamera(); // 非対応の場合はファイル選択へフォールバック
+            }
+        }
 
         async function openLiveScanner() {
             const scannerContainer = document.getElementById('scanner-container');
@@ -374,117 +429,93 @@
             // UIのリセット
             const ocrResult = document.getElementById('live-ocr-result');
             if (ocrResult) {
-                ocrResult.textContent = '認識結果: (未検出)';
-                ocrResult.dataset.text = '';
                 ocrResult.classList.add('hidden');
             }
-            const confirmBtn = document.getElementById('btn-confirm-scan');
-            if (confirmBtn) confirmBtn.style.display = 'none';
-
-            scannerContainer.classList.remove('hidden');
-            statusText.textContent = "カメラを起動しています...";
-            isScanning = true;
 
             try {
-                // ブラウザがgetUserMediaをサポートしているか確認（HTTPS環境等）
-                if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-                    throw new Error("ブラウザがカメラをサポートしていないか、HTTPS環境ではありません。");
-                }
-                
-                // 背面カメラを「優先」して要求（PC等で背面カメラがない場合は前面カメラにフォールバックします）
                 videoStream = await navigator.mediaDevices.getUserMedia({
                     video: { facingMode: { ideal: "environment" } }
                 });
+                
+                scannerContainer.classList.remove('hidden');
                 videoElement.srcObject = videoStream;
                 videoElement.play();
-                statusText.textContent = "スキャン中... キー番号を枠に合わせてください";
+                statusText.textContent = "キー番号を枠に合わせて「読み取り」を押してください";
 
-                // 映像が再生開始されたらスキャンループを開始
-                videoElement.onloadedmetadata = () => {
-                    startScanLoop();
-                };
             } catch (err) {
                 console.error("Camera access error:", err);
-                statusText.textContent = `カメラの起動に失敗しました: ${err.message || '権限を確認してください'}`;
+                // 権限エラー等でカメラが開けなかった場合はファイル選択へフォールバック
+                scannerContainer.classList.add('hidden');
+                openCamera();
             }
         }
 
         function closeLiveScanner() {
-            isScanning = false;
             const scannerContainer = document.getElementById('scanner-container');
             scannerContainer.classList.add('hidden');
             
-            if (scanTimeout) {
-                clearTimeout(scanTimeout);
-                scanTimeout = null;
-            }
             if (videoStream) {
                 videoStream.getTracks().forEach(track => track.stop());
                 videoStream = null;
             }
         }
 
-        function confirmScan() {
-            const ocrResult = document.getElementById('live-ocr-result');
-            const resultText = ocrResult ? ocrResult.dataset.text : '';
-            if (resultText && resultText.length >= 3) {
-                document.getElementById('key-number').value = resultText;
-                
-                const resultMsg = document.getElementById('result-message');
-                if (resultMsg) {
-                    resultMsg.textContent = '読み取り成功';
-                    resultMsg.style.color = '#000000';
-                }
-                
-                closeLiveScanner();
-                document.getElementById('key-number').focus();
-            }
-        }
-
-        async function startScanLoop() {
+        async function captureAndAnalyze() {
             const videoElement = document.getElementById('live-video');
             const canvas = document.getElementById('scan-canvas');
-            const context = canvas.getContext('2d', { willReadFrequently: true });
+            const context = canvas.getContext('2d');
             const statusText = document.getElementById('scan-status-text');
+            const guideBox = document.getElementById('scan-guide-box');
 
-            const scanFrame = async () => {
-                if (!isScanning) return;
+            if (!videoElement.videoWidth) return;
 
-                if (videoElement.readyState === videoElement.HAVE_ENOUGH_DATA) {
-                    canvas.width = videoElement.videoWidth;
-                    canvas.height = videoElement.videoHeight;
-                    context.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
+            statusText.textContent = "画像解析中...";
+            document.getElementById('loading').innerText = '画像解析中...';
+            document.getElementById('loading').classList.remove('hidden');
 
-                    try {
-                        // キャンバスの画像をTesseractに渡す
-                        const result = await Tesseract.recognize(canvas, 'eng');
-                        const extractedText = result.data.text.replace(/[^a-zA-Z0-9]/g, '');
-                        
-                        // 3文字以上の英数字が検出されたらプレビューを更新する
-                        if (extractedText && extractedText.length >= 3) {
-                            const ocrResult = document.getElementById('live-ocr-result');
-                            if (ocrResult) {
-                                ocrResult.textContent = '認識結果: ' + extractedText;
-                                ocrResult.dataset.text = extractedText;
-                                ocrResult.classList.remove('hidden');
-                            }
-                            const confirmBtn = document.getElementById('btn-confirm-scan');
-                            if (confirmBtn) confirmBtn.style.display = 'block';
-                            // 自動で閉じず、ユーザーが「決定」を押すまで待つ
-                        }
-                    } catch (error) {
-                        console.error('Live Scan Error:', error);
-                    }
-                }
+            try {
+                // ガイド枠のサイズと位置を計算して、その部分だけを切り抜く
+                const videoRect = videoElement.getBoundingClientRect();
+                const guideRect = guideBox.getBoundingClientRect();
+
+                // 実際のビデオの解像度と、画面上の表示サイズの比率を計算
+                const scaleX = videoElement.videoWidth / videoRect.width;
+                const scaleY = videoElement.videoHeight / videoRect.height;
+
+                const cropX = (guideRect.left - videoRect.left) * scaleX;
+                const cropY = (guideRect.top - videoRect.top) * scaleY;
+                const cropW = guideRect.width * scaleX;
+                const cropH = guideRect.height * scaleY;
+
+                // Canvasを切り抜きサイズに設定
+                canvas.width = cropW;
+                canvas.height = cropH;
                 
-                // 次のフレームスキャンを予約 (約800ms間隔)
-                if (isScanning) {
-                    scanTimeout = setTimeout(scanFrame, 800);
-                }
-            };
+                // 切り抜き描画
+                context.drawImage(videoElement, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
 
-            // 最初のスキャンを開始
-            scanFrame();
+                const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+
+                // GASのVision APIへ送信
+                const response = await fetchGasAPI('processVision', {
+                    base64Image: dataUrl
+                });
+
+                if (response.status === 'success' && response.text) {
+                    document.getElementById('key-number').value = response.text;
+                    closeLiveScanner();
+                    document.getElementById('key-number').focus();
+                } else {
+                    alert(response.message || '文字を読み取れませんでした。枠に大きく映してもう一度お試しください。');
+                    statusText.textContent = "キー番号を枠に合わせて「読み取り」を押してください";
+                }
+            } catch (err) {
+                console.error("Vision API Error:", err);
+                alert('読み取り処理中にエラーが発生しました: ' + err.message);
+                statusText.textContent = "エラーが発生しました。もう一度お試しください";
+            } finally {
+                document.getElementById('loading').classList.add('hidden');
+            }
         }
 
         // ================= 通知音の設定 =================
@@ -551,15 +582,16 @@
             }
 
             const keyNumber = document.getElementById('key-number').value.trim();
-            const guestCountRaw = document.getElementById('guest-count').value;
-            const guestCount = parseInt(guestCountRaw, 10) || 1; // 確実に数値にする
+            const companionCountRaw = document.getElementById('companion-count').value;
+            const companionCount = parseInt(companionCountRaw, 10) || 0;
+            const childCountRaw = document.getElementById('child-count').value;
+            const childCount = parseInt(childCountRaw, 10) || 0;
+            
+            // 同伴者が0なら来場人数1、1なら2とする
+            const guestCount = companionCount + 1;
 
             if (!keyNumber) {
                 alert('キー番号を入力してください。');
-                return;
-            }
-            if (guestCount < 1) {
-                alert('来場人数は1以上の数字を入力してください。');
                 return;
             }
 
@@ -570,7 +602,8 @@
                 // fetchを使ってGASのAPIにデータを送信
                 const response = await fetchGasAPI('processReception', {
                     keyNumber: keyNumber,
-                    guestCount: guestCount
+                    guestCount: guestCount,
+                    childCount: childCount
                 });
                 showResult(response);
             } catch (error) {
@@ -667,10 +700,12 @@
 
         function clearInput() {
             const inputKey = document.getElementById('key-number');
-            const inputCount = document.getElementById('guest-count');
+            const inputCompanion = document.getElementById('companion-count');
+            const inputChild = document.getElementById('child-count');
             
             inputKey.value = '';
-            if (inputCount) inputCount.value = '1';
+            if (inputCompanion) inputCompanion.value = '0';
+            if (inputChild) inputChild.value = '0';
             
             // iPad等のタブレットでソフトウェアキーボードが頻繁に出るのを防ぐため、
             // 意図的に自動フォーカス(input.focus())は外してあります。
@@ -687,23 +722,9 @@
             document.getElementById('loading').classList.toggle('hidden', !isShow);
         }
         
-        // ================= OCRカメラ処理 =================
-        let tesseractWorker = null;
-
-        // Tesseractの初期化（バックグラウンドで準備しておく）
-        async function initTesseract() {
-            if (tesseractWorker) return;
-            try {
-                // 英数字の認識なので 'eng' を使用（日本語より高速・高精度）
-                tesseractWorker = await Tesseract.createWorker('eng');
-            } catch (err) {
-                console.error('Tesseract初期化エラー:', err);
-            }
-        }
-
-        // ページ読み込み完了時にワーカーを初期化し、フォーカスを当てる
+        // ================= OCRカメラ処理 (iPad用) =================
+        // ページ読み込み完了時にフォーカスを当てる
         window.addEventListener('DOMContentLoaded', () => {
-            initTesseract();
             document.getElementById('key-number').focus();
         });
 
@@ -716,12 +737,6 @@
         async function handleImageCapture(event) {
             const file = event.target.files[0];
             if (!file) return;
-
-            if (!tesseractWorker) {
-                document.getElementById('loading').innerText = 'OCR準備中...';
-                document.getElementById('loading').classList.remove('hidden');
-                await initTesseract();
-            }
 
             document.getElementById('loading').innerText = '画像解析中...';
             document.getElementById('loading').classList.remove('hidden');
@@ -764,19 +779,19 @@
                     const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
                     
                     try {
-                        const ret = await tesseractWorker.recognize(dataUrl);
-                        // スペースや改行を除去
-                        let text = ret.data.text.trim().replace(/[\r\n\s]+/g, '');
+                        const response = await fetchGasAPI('processVision', {
+                            base64Image: dataUrl
+                        });
 
-                        if (text) {
-                            document.getElementById('key-number').value = text;
+                        if (response.status === 'success' && response.text) {
+                            document.getElementById('key-number').value = response.text;
                             document.getElementById('key-number').focus();
                         } else {
-                            alert('文字を読み取れませんでした。キー番号を大きく映して、もう一度お試しください。');
+                            alert(response.message || '文字を読み取れませんでした。キー番号を大きく映して、もう一度お試しください。');
                         }
-                    } catch (ocrErr) {
-                        alert('読み取り処理中にエラーが発生しました。');
-                        console.error(ocrErr);
+                    } catch (apiErr) {
+                        alert('読み取り処理中にエラーが発生しました。\n' + apiErr.message);
+                        console.error(apiErr);
                     } finally {
                         document.getElementById('loading').innerText = '処理中...';
                         document.getElementById('loading').classList.add('hidden');
