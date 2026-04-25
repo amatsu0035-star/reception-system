@@ -474,18 +474,30 @@
             document.getElementById('loading').classList.remove('hidden');
 
             try {
-                // ガイド枠のサイズと位置を計算して、その部分だけを切り抜く
+                // object-fit: cover に対応した切り抜き計算
                 const videoRect = videoElement.getBoundingClientRect();
                 const guideRect = guideBox.getBoundingClientRect();
 
-                // 実際のビデオの解像度と、画面上の表示サイズの比率を計算
-                const scaleX = videoElement.videoWidth / videoRect.width;
-                const scaleY = videoElement.videoHeight / videoRect.height;
+                // video要素内に表示されている映像のスケールを計算（coverなので大きい方に合わせる）
+                const scale = Math.max(videoRect.width / videoElement.videoWidth, videoRect.height / videoElement.videoHeight);
 
-                const cropX = (guideRect.left - videoRect.left) * scaleX;
-                const cropY = (guideRect.top - videoRect.top) * scaleY;
-                const cropW = guideRect.width * scaleX;
-                const cropH = guideRect.height * scaleY;
+                // 実際にレンダリングされている映像のサイズ
+                const renderedWidth = videoElement.videoWidth * scale;
+                const renderedHeight = videoElement.videoHeight * scale;
+
+                // video要素の中心と映像の中心が合っている前提（デフォルト）でのオフセット
+                const offsetX = (videoRect.width - renderedWidth) / 2;
+                const offsetY = (videoRect.height - renderedHeight) / 2;
+
+                // ガイド枠の映像内での相対座標
+                const guideX_relativeToVideo = guideRect.left - videoRect.left - offsetX;
+                const guideY_relativeToVideo = guideRect.top - videoRect.top - offsetY;
+
+                // 元映像の解像度に変換
+                const cropX = guideX_relativeToVideo / scale;
+                const cropY = guideY_relativeToVideo / scale;
+                const cropW = guideRect.width / scale;
+                const cropH = guideRect.height / scale;
 
                 // Canvasを切り抜きサイズに設定
                 canvas.width = cropW;
